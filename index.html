@@ -1,0 +1,2147 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Smart 3D Virtual Try-On with GLB Integration</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            font-size: 2.8em;
+            margin-bottom: 10px;
+            padding-top: 20px;
+            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.4);
+            font-weight: 300;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #f0f0f0;
+            font-size: 1.3em;
+            margin-bottom: 25px;
+            font-weight: 300;
+            text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+            padding: 0 20px 30px 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .video-container {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            height: 75vh;
+            position: relative;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .video-box {
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            background-color: #000;
+            overflow: hidden;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            backdrop-filter: blur(10px);
+        }
+
+        .video-box h3 {
+            text-align: center;
+            margin: 0;
+            padding: 18px;
+            color: white;
+            background: rgba(0, 0, 0, 0.85);
+            font-size: 1.4em;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 12;
+            backdrop-filter: blur(15px);
+            border-bottom: 2px solid rgba(76, 175, 80, 0.3);
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transform: scaleX(-1);
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Enhanced Preparation Phase Overlay */
+        .preparation-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            color: white;
+            padding: 40px;
+            border-radius: 20px;
+            z-index: 20;
+            backdrop-filter: blur(20px);
+            text-align: center;
+            min-width: 350px;
+            border: 3px solid #4CAF50;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+            display: none;
+        }
+
+        .preparation-overlay.active {
+            display: block;
+            animation: scaleIn 0.5s ease-out;
+        }
+
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.8);
+            }
+
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+
+        .countdown-circle {
+            width: 120px;
+            height: 120px;
+            border: 8px solid rgba(76, 175, 80, 0.3);
+            border-radius: 50%;
+            margin: 20px auto;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .countdown-progress {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            width: 120px;
+            height: 120px;
+            border: 8px solid transparent;
+            border-top-color: #4CAF50;
+            border-radius: 50%;
+            transform: rotate(-90deg);
+            transition: transform 0.1s linear;
+        }
+
+        /* Enhanced Status Overlays */
+        .smart-guidance-overlay {
+            position: absolute;
+            top: 70px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            z-index: 15;
+            backdrop-filter: blur(20px);
+            min-width: 320px;
+            border: 2px solid rgba(76, 175, 80, 0.4);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .guidance-step {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin: 12px 0;
+            padding: 12px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .guidance-step.active {
+            background: rgba(76, 175, 80, 0.2);
+            border-left: 4px solid #4CAF50;
+        }
+
+        .guidance-step.completed {
+            background: rgba(76, 175, 80, 0.15);
+            border-left: 4px solid #4CAF50;
+        }
+
+        .step-icon {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            transition: all 0.4s ease;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            flex-shrink: 0;
+        }
+
+        .step-icon.pending {
+            background-color: #666;
+            border-color: #666;
+        }
+
+        .step-icon.active {
+            background-color: #ff9800;
+            border-color: #ff9800;
+            box-shadow: 0 0 15px #ff9800;
+            animation: pulse 1.5s infinite;
+        }
+
+        .step-icon.completed {
+            background-color: #4CAF50;
+            border-color: #4CAF50;
+            box-shadow: 0 0 15px #4CAF50;
+        }
+
+        .step-text {
+            font-size: 0.95em;
+            font-weight: 500;
+        }
+
+        /* AR Status and Instructions */
+        .ar-status-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 20px 25px;
+            border-radius: 30px;
+            z-index: 15;
+            backdrop-filter: blur(15px);
+            display: none;
+            border: 3px solid #4CAF50;
+            animation: arGlow 2s infinite alternate;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .ar-status-indicator.active {
+            display: block;
+        }
+
+        @keyframes arGlow {
+            from {
+                border-color: #4CAF50;
+                box-shadow: 0 0 25px rgba(76, 175, 80, 0.6);
+            }
+
+            to {
+                border-color: #45a049;
+                box-shadow: 0 0 35px rgba(76, 175, 80, 0.9);
+            }
+        }
+
+        /* Smart Positioning Guide */
+        .positioning-guide {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 30px;
+            z-index: 15;
+            backdrop-filter: blur(15px);
+            text-align: center;
+            border: 2px solid #4CAF50;
+            display: none;
+            max-width: 85%;
+            font-weight: 500;
+        }
+
+        .positioning-guide.show {
+            display: block;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        .positioning-guide.warning {
+            border-color: #ff9800;
+            background: rgba(255, 152, 0, 0.2);
+        }
+
+        .positioning-guide.success {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.2);
+        }
+
+        /* Tracking Status Indicator */
+        .tracking-indicator {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 20px;
+            z-index: 15;
+            backdrop-filter: blur(15px);
+            display: none;
+            border: 2px solid #00BCD4;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .tracking-indicator.active {
+            display: block;
+            animation: trackingPulse 2s infinite;
+        }
+
+        @keyframes trackingPulse {
+
+            0%,
+            100% {
+                border-color: #00BCD4;
+            }
+
+            50% {
+                border-color: #4CAF50;
+            }
+        }
+
+        /* Enhanced Controls Section */
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+            background: rgba(255, 255, 255, 0.98);
+            padding: 35px;
+            border-radius: 20px;
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(15px);
+        }
+
+        .control-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 15px;
+            border-left: 5px solid #667eea;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .control-section:hover {
+            transform: translateY(-2px);
+        }
+
+        .control-section h3 {
+            margin: 0 0 20px 0;
+            color: #333;
+            font-size: 1.3em;
+            font-weight: 600;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        button:hover::before {
+            left: 100%;
+        }
+
+        button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            background: linear-gradient(135deg, #ccc, #999);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        button:disabled::before {
+            display: none;
+        }
+
+        .upload-btn {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            box-shadow: 0 8px 25px rgba(255, 107, 107, 0.3);
+        }
+
+        .upload-btn:hover {
+            box-shadow: 0 12px 30px rgba(255, 107, 107, 0.4);
+        }
+
+        .start-btn {
+            background: linear-gradient(135deg, #00d2d3, #54a0ff);
+            box-shadow: 0 8px 25px rgba(0, 210, 211, 0.3);
+        }
+
+        .start-btn:hover {
+            box-shadow: 0 12px 30px rgba(0, 210, 211, 0.4);
+        }
+
+        .stop-btn {
+            background: linear-gradient(135deg, #ff3838, #ff6b6b);
+            box-shadow: 0 8px 25px rgba(255, 56, 56, 0.3);
+        }
+
+        .stop-btn:hover {
+            box-shadow: 0 12px 30px rgba(255, 56, 56, 0.4);
+        }
+
+        /* Enhanced Status Display */
+        .status {
+            padding: 25px;
+            border-radius: 15px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            font-weight: 600;
+            text-align: center;
+            font-size: 1.1em;
+            box-shadow: 0 10px 30px rgba(240, 147, 251, 0.3);
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 25px;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            border-top: 4px solid transparent;
+        }
+
+        .status-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .status-card h4 {
+            margin: 0 0 15px 0;
+            color: #333;
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+
+        .status-card .status-value {
+            font-size: 1.6em;
+            font-weight: bold;
+            margin: 12px 0;
+            transition: all 0.3s ease;
+        }
+
+        .status-card .status-value.active {
+            color: #4CAF50;
+            text-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+        }
+
+        .status-card .status-value.inactive {
+            color: #f44336;
+        }
+
+        .status-card .status-value.pending {
+            color: #ff9800;
+        }
+
+        .status-card .status-value.preparing {
+            color: #2196F3;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-card.active {
+            border-top-color: #4CAF50;
+        }
+
+        .status-card.pending {
+            border-top-color: #ff9800;
+        }
+
+        .status-card.preparing {
+            border-top-color: #2196F3;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        #uploadStatus {
+            margin-top: 20px;
+            padding: 20px;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border-radius: 12px;
+            color: white;
+            font-weight: 600;
+            text-align: center;
+            box-shadow: 0 8px 25px rgba(79, 172, 254, 0.3);
+        }
+
+        #imageUpload {
+            display: none;
+        }
+
+        /* AR Controls */
+        #ar-controls {
+            position: fixed;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 99;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 25px;
+            border-radius: 20px;
+            color: white;
+            display: none;
+            gap: 20px;
+            backdrop-filter: blur(20px);
+            border: 3px solid rgba(76, 175, 80, 0.4);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        #ar-controls.active {
+            display: flex;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        #ar-controls button {
+            padding: 12px 20px;
+            font-size: 14px;
+            border-radius: 20px;
+        }
+
+        /* Position Controls */
+        #position-controls {
+            position: fixed;
+            top: 25px;
+            right: 25px;
+            z-index: 99;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 25px;
+            border-radius: 15px;
+            color: white;
+            backdrop-filter: blur(20px);
+            min-width: 250px;
+            display: none;
+            border: 3px solid rgba(76, 175, 80, 0.4);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        #position-controls.active {
+            display: block;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .slider-container {
+            margin: 15px 0;
+        }
+
+        .slider-container label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.3);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(76, 175, 80, 0.6);
+        }
+
+        /* Enhanced Instructions and Info */
+        .smart-instructions {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 30px;
+            border-radius: 20px;
+            color: white;
+            margin-top: 25px;
+            backdrop-filter: blur(15px);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .smart-instructions h3 {
+            color: #4CAF50;
+            margin-bottom: 25px;
+            text-align: center;
+            font-size: 1.5em;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .instruction-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 25px;
+        }
+
+        .instruction-step {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 25px;
+            border-radius: 15px;
+            border-left: 5px solid #4CAF50;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .instruction-step:hover {
+            transform: translateY(-3px);
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .instruction-step h4 {
+            margin: 0 0 15px 0;
+            color: #4CAF50;
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+
+        .instruction-step p {
+            margin: 0;
+            font-size: 1em;
+            line-height: 1.6;
+            opacity: 0.95;
+        }
+
+        .detected-items {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .detected-items h3 {
+            color: #333;
+            margin-top: 0;
+            font-size: 1.3em;
+            font-weight: 600;
+        }
+
+        .detected-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .detected-item:last-child {
+            border-bottom: none;
+        }
+
+        .item-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 1.05em;
+        }
+
+        .item-color {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+            vertical-align: middle;
+            border: 3px solid #fff;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Loading and Error Messages */
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.95);
+            padding: 40px;
+            border-radius: 20px;
+            z-index: 100;
+            font-size: 1.3em;
+            text-align: center;
+            border: 3px solid #4CAF50;
+            min-width: 350px;
+            display: none;
+            backdrop-filter: blur(25px);
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        #error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background: rgba(255, 0, 0, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            z-index: 101;
+            display: none;
+            text-align: center;
+            max-width: 450px;
+            backdrop-filter: blur(15px);
+            box-shadow: 0 20px 50px rgba(255, 0, 0, 0.3);
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.2em;
+                padding-top: 15px;
+            }
+
+            .subtitle {
+                font-size: 1.1em;
+            }
+
+            .container {
+                padding: 0 15px 25px 15px;
+            }
+
+            .video-container {
+                height: 60vh;
+                border-radius: 15px;
+            }
+
+            .video-box {
+                border-radius: 15px;
+            }
+
+            .controls {
+                border-radius: 15px;
+                padding: 25px;
+            }
+
+            .control-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            button {
+                width: 100%;
+                margin: 5px 0;
+            }
+
+            .smart-guidance-overlay {
+                top: 60px;
+                left: 15px;
+                right: 15px;
+                min-width: auto;
+                padding: 20px;
+            }
+
+            .positioning-guide {
+                bottom: 20px;
+                left: 15px;
+                right: 15px;
+                transform: none;
+                padding: 15px 20px;
+            }
+
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .instruction-steps {
+                grid-template-columns: 1fr;
+            }
+
+            #position-controls {
+                top: 15px;
+                right: 15px;
+                padding: 20px;
+                min-width: 200px;
+            }
+
+            #ar-controls {
+                bottom: 15px;
+                width: 90%;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .preparation-overlay {
+                min-width: 300px;
+                padding: 30px;
+            }
+
+            .tracking-indicator {
+                top: 60px;
+                right: 15px;
+                padding: 10px 15px;
+                font-size: 0.8em;
+            }
+        }
+
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 1.8em;
+            }
+
+            .subtitle {
+                font-size: 1em;
+            }
+
+            .preparation-overlay {
+                min-width: 280px;
+                padding: 25px;
+            }
+
+            .countdown-circle {
+                width: 100px;
+                height: 100px;
+                font-size: 2em;
+            }
+
+            .countdown-progress {
+                width: 100px;
+                height: 100px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🚀 Enhanced Smart 3D AR Virtual Try-On with GLB</h1>
+    <p class="subtitle">Real-time tracking with CSRT + Kalman filtering + GLB model integration</p>
+
+    <div class="container">
+        <div class="video-container">
+            <div class="video-box">
+                <h3>📹 Enhanced Smart Camera with GLB Model Support</h3>
+                <video id="video" autoplay playsinline muted></video>
+                <div id="canvas-container"></div>
+
+                <!-- Preparation Phase Overlay -->
+                <div class="preparation-overlay" id="preparationOverlay">
+                    <h2 style="margin: 0 0 20px 0; color: #4CAF50;">🎯 AR Calibration Phase</h2>
+                    <p style="margin: 0 0 25px 0; font-size: 1.1em;">Hold still while we calibrate your tracking
+                        system...</p>
+                    <div class="countdown-circle">
+                        <div class="countdown-progress" id="countdownProgress"></div>
+                        <span id="countdownNumber">4</span>
+                    </div>
+                    <p style="margin: 15px 0 0 0; font-size: 0.95em; opacity: 0.8;">Keep your pose steady for perfect AR
+                        tracking</p>
+                </div>
+
+                <!-- Smart Guidance Overlay -->
+                <div class="smart-guidance-overlay" id="smartGuidanceOverlay" style="display: none;">
+                    <h4 style="margin: 0 0 20px 0; color: #4CAF50; font-size: 1.2em;">🎯 Enhanced Setup Guide</h4>
+                    <div class="guidance-step" id="step1">
+                        <div class="step-icon pending" id="icon1"></div>
+                        <span class="step-text">Stand in camera view</span>
+                    </div>
+                    <div class="guidance-step" id="step2">
+                        <div class="step-icon pending" id="icon2"></div>
+                        <span class="step-text">Face camera directly</span>
+                    </div>
+                    <div class="guidance-step" id="step3">
+                        <div class="step-icon pending" id="icon3"></div>
+                        <span class="step-text">Show shoulders & torso</span>
+                    </div>
+                    <div class="guidance-step" id="step4">
+                        <div class="step-icon pending" id="icon4"></div>
+                        <span class="step-text">Hold still for calibration</span>
+                    </div>
+                    <div class="guidance-step" id="step5">
+                        <div class="step-icon pending" id="icon5"></div>
+                        <span class="step-text">Real-time AR tracking active!</span>
+                    </div>
+                </div>
+
+                <!-- AR Active Indicator -->
+                <div class="ar-status-indicator" id="arActiveIndicator">
+                    ✨ REAL-TIME AR TRACKING ACTIVE ✨
+                </div>
+
+                <!-- Tracking Status Indicator -->
+                <div class="tracking-indicator" id="trackingIndicator">
+                    🎯 CSRT Tracking Active
+                </div>
+
+                <!-- Smart Positioning Guide -->
+                <div class="positioning-guide" id="positioningGuide">
+                    📏 Follow the steps above to begin your enhanced AR experience
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-section">
+                <h3>📁 Upload Garment Images</h3>
+                <div class="control-group">
+                    <button id="uploadBtn" class="upload-btn">📤 Choose Garment Images</button>
+                    <input type="file" id="imageUpload" multiple accept="image/*" capture="environment">
+                </div>
+                <div id="uploadStatus">No images uploaded yet. Upload garment images to begin.</div>
+
+                <div id="detectedItemsContainer" class="detected-items" style="display: none;">
+                    <h3>👚 Detected Garments</h3>
+                    <div id="detectedItemsList"></div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>🎥 Enhanced Smart Camera Controls</h3>
+                <div class="control-group">
+                    <button id="startBtn" class="start-btn" disabled>🚀 Start Enhanced AR Experience</button>
+                    <button id="stopBtn" class="stop-btn" disabled>⏹️ Stop Camera</button>
+                </div>
+            </div>
+
+            <!-- Enhanced Status Display -->
+            <div class="status">
+                <p>📊 Enhanced System Status: <span id="statusText">Upload garment images to begin</span></p>
+                <div class="status-grid">
+                    <div class="status-card" id="humanCard">
+                        <h4>👤 Human Detection</h4>
+                        <div class="status-value" id="humanStatus">Waiting</div>
+                        <small>Enhanced person recognition</small>
+                    </div>
+                    <div class="status-card" id="poseCard">
+                        <h4>🎯 Pose Analysis</h4>
+                        <div class="status-value" id="poseStatus">Waiting</div>
+                        <small>Kalman-filtered tracking</small>
+                    </div>
+                    <div class="status-card" id="shirtCard">
+                        <h4>👕 Shirt Region</h4>
+                        <div class="status-value" id="shirtRegionStatus">Waiting</div>
+                        <small>YOLO garment detection</small>
+                    </div>
+                    <div class="status-card" id="trackingCard">
+                        <h4>📡 CSRT Tracking</h4>
+                        <div class="status-value" id="trackingStatus">Waiting</div>
+                        <small>Real-time region tracking</small>
+                    </div>
+                    <div class="status-card" id="arCard">
+                        <h4>🚀 AR Experience</h4>
+                        <div class="status-value" id="arStatus">Waiting</div>
+                        <small>GLB 3D mesh rendering</small>
+                    </div>
+                    <div class="status-card" id="colorCard">
+                        <h4>🎨 Color Detection</h4>
+                        <div class="status-value" id="shirtColorText">Waiting</div>
+                        <small>Garment color analysis</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Enhanced Smart Instructions -->
+        <div class="smart-instructions">
+            <h3>🧠 Enhanced Smart AR with GLB Model Integration</h3>
+            <p style="text-align: center; margin-bottom: 30px; font-size: 1.1em;">
+                Our advanced system now uses GLB models with CSRT tracking and Kalman filtering for ultra-smooth AR
+                experience:
+            </p>
+
+            <div class="instruction-steps">
+                <div class="instruction-step">
+                    <h4>📍 Optimal Positioning</h4>
+                    <p>Stand 4-6 feet from camera. The enhanced system detects distance and adjusts GLB mesh
+                        automatically
+                        with improved accuracy.</p>
+                </div>
+                <div class="instruction-step">
+                    <h4>🧍 Perfect Posture</h4>
+                    <p>Face camera with shoulders visible. Arms slightly away from body. Relaxed thresholds ensure
+                        better detection.</p>
+                </div>
+                <div class="instruction-step">
+                    <h4>⏱️ Quick Calibration</h4>
+                    <p>4-second calibration for perfect tracking. CSRT tracker then follows your shirt region
+                        continuously.</p>
+                </div>
+                <div class="instruction-step">
+                    <h4>✨ Smooth GLB Rendering</h4>
+                    <p>Kalman-filtered pose data ensures jitter-free movement. GLB 3D mesh stays perfectly anchored to
+                        your
+                        body with realistic rendering!</p>
+                </div>
+            </div>
+        </div>
+
+        <div
+            style="background: rgba(255, 255, 255, 0.1); padding: 30px; border-radius: 20px; color: white; text-align: center; margin-top: 25px; backdrop-filter: blur(15px);">
+            <h3 style="color: #FFD700; margin-bottom: 20px; font-size: 1.4em;">🔥 Enhanced Technical Features</h3>
+            <p style="font-size: 1.05em; line-height: 1.6;">
+                🤖 <strong>YOLO Detection:</strong> Advanced garment detection with lower thresholds for better
+                accuracy<br>
+                📡 <strong>CSRT Tracking:</strong> Continuous shirt region tracking without constant re-detection<br>
+                🎯 <strong>Kalman Filtering:</strong> Smooth pose data with reduced jitter and stable positioning<br>
+                📐 <strong>Smart Anchoring:</strong> GLB mesh perfectly anchored to shoulder/hip landmarks<br>
+                🔄 <strong>GLB Integration:</strong> Advanced 3D model format with realistic materials and textures<br>
+                🎨 <strong>Color Matching:</strong> Automatic color extraction and application to GLB materials<br>
+                🧠 <strong>Enhanced Thresholds:</strong> Relaxed detection criteria for better human recognition<br>
+                ⚡ <strong>Real-time Processing:</strong> Optimized pipeline for smooth 30fps GLB rendering
+            </p>
+        </div>
+    </div>
+
+    <!-- AR Controls -->
+    <div id="ar-controls">
+        <button id="rotateBtn">Toggle Rotation</button>
+        <button id="resetBtn">Reset Position</button>
+        <button id="colorBtn">Change Color</button>
+        <button id="scaleBtn">Auto Scale</button>
+    </div>
+
+    <!-- Position Controls -->
+    <div id="position-controls">
+        <h4 style="margin-top: 0; color: #4CAF50;">🎛️ Fine Tuning</h4>
+        <div class="slider-container">
+            <label for="scale">Size: <span id="scaleValue">1.0</span></label>
+            <input type="range" id="scale" min="0.3" max="2.5" step="0.1" value="1.0">
+        </div>
+        <div class="slider-container">
+            <label for="opacity">Opacity: <span id="opacityValue">0.9</span></label>
+            <input type="range" id="opacity" min="0.2" max="1" step="0.1" value="0.9">
+        </div>
+        <div class="slider-container">
+            <label for="xPosition">X Offset: <span id="xValue">0</span></label>
+            <input type="range" id="xPosition" min="-0.8" max="0.8" step="0.05" value="0">
+        </div>
+        <div class="slider-container">
+            <label for="yPosition">Y Offset: <span id="yValue">0</span></label>
+            <input type="range" id="yPosition" min="-0.8" max="0.8" step="0.05" value="0">
+        </div>
+    </div>
+
+    <!-- Loading and Error Messages -->
+    <div id="loading">
+        <div>🚀 Initializing Enhanced Smart AR System with GLB...</div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div id="loading-text">Starting enhanced detection and GLB rendering systems...</div>
+    </div>
+
+    <div id="error-message"></div>
+
+    <script>
+        // Global variables for Enhanced Three.js and Smart AR system with GLB support
+        let scene, camera, renderer, shirt, clock;
+        let isRotating = false;
+        let currentScale = 1.0;
+        let currentOpacity = 0.9;
+        let currentXOffset = 0;
+        let currentYOffset = 0;
+        let colors = [0x333333, 0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
+        let currentColorIndex = 0;
+        let loadingSteps = 0;
+        let totalSteps = 5;
+        let statusInterval;
+        let poseInterval;
+        let arActive = false;
+        let detectedShirtColor = null;
+        let lastPoseStatus = {
+            humanDetected: false,
+            shirtRegionValid: false,
+            arInitialized: false,
+            autoDetectionActive: false,
+            preparationActive: false,
+            trackingActive: false
+        };
+        let meshPosition = { x: 0, y: 0, z: 0, scale: 1.0, rotation: { x: 0, y: 0, z: 0 } };
+        let autoScaleEnabled = true;
+        let preparationCountdown = null;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const uploadBtn = document.getElementById('uploadBtn');
+            const imageUpload = document.getElementById('imageUpload');
+            const uploadStatus = document.getElementById('uploadStatus');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const statusText = document.getElementById('statusText');
+            const shirtColorText = document.getElementById('shirtColorText');
+            const detectedItemsContainer = document.getElementById('detectedItemsContainer');
+            const detectedItemsList = document.getElementById('detectedItemsList');
+            const video = document.getElementById('video');
+
+            // Check camera status periodically
+            statusInterval = setInterval(checkCameraStatus, 500);
+
+            // Upload button click triggers file input
+            uploadBtn.addEventListener('click', function () {
+                imageUpload.click();
+            });
+
+            // Handle file selection
+            imageUpload.addEventListener('change', function () {
+                if (this.files.length === 0) return;
+
+                const formData = new FormData();
+                for (let i = 0; i < this.files.length; i++) {
+                    formData.append('images', this.files[i]);
+                }
+
+                uploadStatus.textContent = '🔍 Enhanced AI analyzing garment images...';
+                uploadStatus.style.background = 'linear-gradient(135deg, #ffa726 0%, #fb8c00 100%)';
+
+                fetch('/upload_images', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            uploadStatus.textContent = '✅ ' + data.message + ' - Enhanced AR with GLB ready!';
+                            uploadStatus.style.background = 'linear-gradient(135deg, #66bb6a 0%, #43a047 100%)';
+                            startBtn.disabled = false;
+
+                            // Store detected shirt color
+                            if (data.shirt_color) {
+                                detectedShirtColor = data.shirt_color.hex;
+                                const [r, g, b] = data.shirt_color.rgb;
+                                shirtColorText.textContent = `RGB(${r}, ${g}, ${b})`;
+                                shirtColorText.style.color = `rgb(${r}, ${g}, ${b})`;
+                            }
+
+                            // Display detected items
+                            if (data.detected_garments && data.detected_garments.length > 0) {
+                                detectedItemsContainer.style.display = 'block';
+                                detectedItemsList.innerHTML = '';
+
+                                data.detected_garments.forEach(item => {
+                                    const [b, g, r] = item.color || [0, 0, 255];
+                                    const itemElement = document.createElement('div');
+                                    itemElement.className = 'detected-item';
+                                    itemElement.innerHTML = `
+                                        <span class="item-name">${item.class} (${Math.round(item.confidence * 100)}%)</span>
+                                        <span>
+                                            <span class="item-color" style="background-color: rgb(${r}, ${g}, ${b})"></span>
+                                            ${item.color_name}
+                                        </span>
+                                    `;
+                                    detectedItemsList.appendChild(itemElement);
+                                });
+                            }
+                        } else {
+                            uploadStatus.textContent = '❌ ' + (data.message || 'Upload failed');
+                            uploadStatus.style.background = 'linear-gradient(135deg, #ef5350 0%, #e53935 100%)';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        uploadStatus.textContent = '❌ Failed to analyze images - Please try again';
+                        uploadStatus.style.background = 'linear-gradient(135deg, #ef5350 0%, #e53935 100%)';
+                    });
+            });
+
+            // Start camera button
+            startBtn.addEventListener('click', function () {
+                document.getElementById('loading').style.display = 'block';
+                updateProgress(0, 'Starting enhanced smart camera and GLB rendering systems...');
+
+                fetch('/start_camera', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            statusText.textContent = '🟡 Enhanced system active - Follow guidance for optimal GLB tracking!';
+                            startBtn.disabled = true;
+                            stopBtn.disabled = false;
+                            initCamera();
+                            arActive = true;
+
+                            // Show smart guidance overlay
+                            document.getElementById('smartGuidanceOverlay').style.display = 'block';
+                            document.getElementById('positioningGuide').classList.add('show');
+
+                            // Start enhanced pose checking
+                            poseInterval = setInterval(checkEnhancedPoseLandmarks, 150); // Higher frequency for better tracking
+                        } else {
+                            showError('Error: ' + data.message);
+                            document.getElementById('loading').style.display = 'none';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showError('Failed to start camera - Please check permissions');
+                        document.getElementById('loading').style.display = 'none';
+                    });
+            });
+
+            // Stop camera button
+            stopBtn.addEventListener('click', function () {
+                fetch('/stop_camera', {
+                    method: 'POST'
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            statusText.textContent = '🔴 Camera inactive - Upload images to start enhanced GLB experience';
+                            startBtn.disabled = false;
+                            stopBtn.disabled = true;
+                            cleanupAR();
+                            arActive = false;
+
+                            // Hide all overlays
+                            document.getElementById('smartGuidanceOverlay').style.display = 'none';
+                            document.getElementById('positioningGuide').classList.remove('show');
+                            document.getElementById('arActiveIndicator').classList.remove('active');
+                            document.getElementById('trackingIndicator').classList.remove('active');
+                            document.getElementById('preparationOverlay').classList.remove('active');
+
+                            // Stop pose checking
+                            if (poseInterval) {
+                                clearInterval(poseInterval);
+                                poseInterval = null;
+                            }
+
+                            // Clear preparation countdown
+                            if (preparationCountdown) {
+                                clearInterval(preparationCountdown);
+                                preparationCountdown = null;
+                            }
+
+                            // Reset all status displays
+                            resetAllStatusDisplays();
+                        } else {
+                            showError('Error: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showError('Failed to stop camera');
+                    });
+            });
+
+            // AR Controls
+            document.getElementById('rotateBtn').addEventListener('click', toggleRotation);
+            document.getElementById('resetBtn').addEventListener('click', resetPosition);
+            document.getElementById('colorBtn').addEventListener('click', changeColor);
+            document.getElementById('scaleBtn').addEventListener('click', toggleAutoScale);
+
+            // Enhanced slider controls
+            const sliders = ['scale', 'opacity', 'xPosition', 'yPosition'];
+            sliders.forEach(sliderId => {
+                const slider = document.getElementById(sliderId);
+                const valueDisplay = document.getElementById(sliderId === 'xPosition' ? 'xValue' :
+                    sliderId === 'yPosition' ? 'yValue' :
+                        sliderId + 'Value');
+
+                slider.addEventListener('input', function () {
+                    const value = parseFloat(this.value);
+                    if (valueDisplay) {
+                        valueDisplay.textContent = value.toFixed(sliderId === 'opacity' ? 1 : 2);
+                    }
+
+                    switch (sliderId) {
+                        case 'scale': updateScale(this); break;
+                        case 'opacity': updateOpacity(this); break;
+                        case 'xPosition': updateXOffset(this); break;
+                        case 'yPosition': updateYOffset(this); break;
+                    }
+                });
+            });
+
+            // Clean up intervals when page unloads
+            window.addEventListener('beforeunload', function () {
+                clearInterval(statusInterval);
+                if (poseInterval) clearInterval(poseInterval);
+                if (preparationCountdown) clearInterval(preparationCountdown);
+                if (stopBtn.disabled === false) {
+                    fetch('/stop_camera', {
+                        method: 'POST',
+                        keepalive: true
+                    });
+                }
+                cleanupAR();
+            });
+        });
+
+        // Enhanced smart pose landmarks checking with tracking status
+        function checkEnhancedPoseLandmarks() {
+            if (!arActive) return;
+
+            fetch('/pose_landmarks')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const humanDetected = data.landmarks && data.landmarks.length > 0;
+                        const shirtRegionValid = data.shirt_region_valid;
+                        const arInitialized = data.ar_initialized;
+                        const preparationActive = data.preparation_status && data.preparation_status.active;
+                        const trackingActive = data.shirt_tracking_active;
+
+                        // Update enhanced guidance
+                        updateEnhancedGuidance(humanDetected, shirtRegionValid, arInitialized, preparationActive, trackingActive);
+
+                        // Handle preparation phase
+                        if (preparationActive && data.preparation_status) {
+                            showPreparationCountdown(data.preparation_status);
+                        } else {
+                            hidePreparationCountdown();
+                        }
+
+                        // Update mesh position if AR is active
+                        if (arInitialized && data.mesh_position && shirt) {
+                            updateMeshFromPose(data.mesh_position);
+                        }
+
+                        // Update detection confidence
+                        if (data.detection_confidence) {
+                            const confidencePercent = Math.round(data.detection_confidence * 100);
+                            updateStatusCard('colorCard', 'shirtColorText',
+                                `${confidencePercent}% confidence`, data.detection_confidence > 0.4);
+                        }
+
+                        // Update main status text
+                        updateEnhancedStatusText(humanDetected, shirtRegionValid, arInitialized, preparationActive, trackingActive);
+
+                    } else {
+                        updateEnhancedGuidance(false, false, false, false, false);
+                        document.getElementById('statusText').textContent = '🔍 Enhanced GLB system searching for person...';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking pose landmarks:', error);
+                    updateEnhancedGuidance(false, false, false, false, false);
+                });
+        }
+
+        // Enhanced guidance update system with tracking status
+        function updateEnhancedGuidance(humanDetected, shirtRegionValid, arInitialized, preparationActive, trackingActive) {
+            // Update step icons and states
+            const steps = [
+                { id: 'step1', icon: 'icon1', condition: humanDetected },
+                { id: 'step2', icon: 'icon2', condition: humanDetected },
+                { id: 'step3', icon: 'icon3', condition: shirtRegionValid },
+                { id: 'step4', icon: 'icon4', condition: preparationActive || arInitialized },
+                { id: 'step5', icon: 'icon5', condition: arInitialized }
+            ];
+
+            steps.forEach((step, index) => {
+                const stepElement = document.getElementById(step.id);
+                const iconElement = document.getElementById(step.icon);
+
+                if (step.condition) {
+                    stepElement.classList.add('completed');
+                    stepElement.classList.remove('active');
+                    iconElement.className = 'step-icon completed';
+                } else if (index === 0 || steps[index - 1].condition) {
+                    stepElement.classList.add('active');
+                    stepElement.classList.remove('completed');
+                    iconElement.className = 'step-icon active';
+                } else {
+                    stepElement.classList.remove('active', 'completed');
+                    iconElement.className = 'step-icon pending';
+                }
+            });
+
+            // Update status cards with enhanced tracking info
+            updateStatusCard('humanCard', 'humanStatus', humanDetected ? 'Detected' : 'Searching...', humanDetected);
+            updateStatusCard('poseCard', 'poseStatus', humanDetected ? 'Active' : 'Waiting', humanDetected);
+            updateStatusCard('shirtCard', 'shirtRegionStatus',
+                shirtRegionValid ? 'Valid' : (humanDetected ? 'Analyzing...' : 'Waiting'), shirtRegionValid);
+            updateStatusCard('trackingCard', 'trackingStatus',
+                trackingActive ? 'CSRT Active' : (arInitialized ? 'Initializing...' : 'Waiting'), trackingActive);
+            updateStatusCard('arCard', 'arStatus',
+                arInitialized ? 'GLB Active' : (preparationActive ? 'Preparing...' : 'Waiting'), arInitialized);
+
+            // Update AR active indicator
+            const arIndicator = document.getElementById('arActiveIndicator');
+            if (arInitialized) {
+                arIndicator.classList.add('active');
+            } else {
+                arIndicator.classList.remove('active');
+            }
+
+            // Update tracking indicator
+            const trackingIndicator = document.getElementById('trackingIndicator');
+            if (trackingActive) {
+                trackingIndicator.classList.add('active');
+            } else {
+                trackingIndicator.classList.remove('active');
+            }
+
+            // Update positioning guide
+            updateEnhancedPositioningGuide(humanDetected, shirtRegionValid, arInitialized, preparationActive, trackingActive);
+
+            // Show/hide AR controls
+            const arControls = document.getElementById('ar-controls');
+            const positionControls = document.getElementById('position-controls');
+
+            if (arInitialized) {
+                arControls.classList.add('active');
+                positionControls.classList.add('active');
+            } else {
+                arControls.classList.remove('active');
+                positionControls.classList.remove('active');
+            }
+
+            // Initialize Three.js when AR becomes active
+            if (arInitialized && !lastPoseStatus.arInitialized) {
+                if (!scene) {
+                    updateProgress(3, 'AR activated! Loading enhanced GLB 3D graphics...');
+                    initThreeJS();
+                }
+            }
+
+            // Update last status
+            lastPoseStatus = { humanDetected, shirtRegionValid, arInitialized, preparationActive, trackingActive };
+        }
+
+        // Status card update helper
+        function updateStatusCard(cardId, statusId, text, isActive) {
+            const card = document.getElementById(cardId);
+            const status = document.getElementById(statusId);
+
+            status.textContent = text;
+
+            if (isActive) {
+                status.className = 'status-value active';
+                card.className = 'status-card active';
+            } else if (text.includes('...')) {
+                status.className = 'status-value pending';
+                card.className = 'status-card pending';
+            } else {
+                status.className = 'status-value inactive';
+                card.className = 'status-card';
+            }
+        }
+
+        // Enhanced positioning guide updates
+        function updateEnhancedPositioningGuide(humanDetected, shirtRegionValid, arInitialized, preparationActive, trackingActive) {
+            const guide = document.getElementById('positioningGuide');
+
+            if (arInitialized && trackingActive) {
+                guide.className = 'positioning-guide show success';
+                guide.textContent = '✅ Perfect! Enhanced AR with GLB tracking active - Move naturally!';
+            } else if (arInitialized) {
+                guide.className = 'positioning-guide show success';
+                guide.textContent = '🎯 GLB AR active! Initializing enhanced tracking system...';
+            } else if (preparationActive) {
+                guide.className = 'positioning-guide show success';
+                guide.textContent = '⏱️ Hold position steady - Enhanced GLB AR calibration in progress...';
+            } else if (shirtRegionValid) {
+                guide.className = 'positioning-guide show success';
+                guide.textContent = '🎯 Perfect pose detected! Hold still for enhanced GLB calibration...';
+            } else if (humanDetected) {
+                guide.className = 'positioning-guide show warning';
+                guide.textContent = '📏 Good! Face camera directly and show your full torso area';
+            } else {
+                guide.className = 'positioning-guide show';
+                guide.textContent = '👤 Step into camera view (4-6 feet distance works best)';
+            }
+        }
+
+        // Enhanced main status text updates
+        function updateEnhancedStatusText(humanDetected, shirtRegionValid, arInitialized, preparationActive, trackingActive) {
+            if (arInitialized && trackingActive) {
+                document.getElementById('statusText').textContent = '🟢 Enhanced GLB AR Active - CSRT tracking with Kalman filtering!';
+            } else if (arInitialized) {
+                document.getElementById('statusText').textContent = '🟡 GLB AR Active - Initializing enhanced tracking system...';
+            } else if (preparationActive) {
+                document.getElementById('statusText').textContent = '🟡 Enhanced GLB calibration in progress - Hold position steady...';
+            } else if (shirtRegionValid) {
+                document.getElementById('statusText').textContent = '🟡 Perfect pose detected - Ready for enhanced GLB AR calibration!';
+            } else if (humanDetected) {
+                document.getElementById('statusText').textContent = '🟠 Person detected - Position for optimal shirt region visibility';
+            } else {
+                document.getElementById('statusText').textContent = '🔍 Enhanced GLB system active - Enter camera view to begin';
+            }
+        }
+
+        // Preparation countdown display
+        function showPreparationCountdown(prepStatus) {
+            const overlay = document.getElementById('preparationOverlay');
+            const countdownNumber = document.getElementById('countdownNumber');
+            const progress = document.getElementById('countdownProgress');
+
+            overlay.classList.add('active');
+
+            const remaining = Math.ceil(prepStatus.time_remaining);
+            countdownNumber.textContent = remaining;
+
+            // Update progress circle
+            const angle = (prepStatus.progress / 100) * 360;
+            progress.style.transform = `rotate(${angle - 90}deg)`;
+
+            if (prepStatus.progress >= 100) {
+                setTimeout(() => {
+                    overlay.classList.remove('active');
+                }, 500);
+            }
+        }
+
+        // Hide preparation countdown
+        function hidePreparationCountdown() {
+            const overlay = document.getElementById('preparationOverlay');
+            overlay.classList.remove('active');
+        }
+
+        // Reset all status displays
+        function resetAllStatusDisplays() {
+            const statusElements = [
+                { id: 'humanStatus', text: 'Waiting', card: 'humanCard' },
+                { id: 'poseStatus', text: 'Waiting', card: 'poseCard' },
+                { id: 'shirtRegionStatus', text: 'Waiting', card: 'shirtCard' },
+                { id: 'trackingStatus', text: 'Waiting', card: 'trackingCard' },
+                { id: 'arStatus', text: 'Waiting', card: 'arCard' },
+                { id: 'shirtColorText', text: 'Waiting', card: 'colorCard' }
+            ];
+
+            statusElements.forEach(({ id, text, card }) => {
+                const element = document.getElementById(id);
+                const cardElement = document.getElementById(card);
+                element.textContent = text;
+                element.className = 'status-value inactive';
+                cardElement.className = 'status-card';
+            });
+
+            // Reset guidance steps
+            for (let i = 1; i <= 5; i++) {
+                document.getElementById(`step${i}`).classList.remove('active', 'completed');
+                document.getElementById(`icon${i}`).className = 'step-icon pending';
+            }
+        }
+
+        // Update mesh position based on pose data with enhanced smoothing
+        function updateMeshFromPose(posePosition) {
+            if (!shirt || !autoScaleEnabled) return;
+
+            const lerpFactor = 0.12; // Slightly slower for more stability
+
+            // Update position with enhanced smoothing
+            const targetX = posePosition.x + currentXOffset;
+            const targetY = posePosition.y + currentYOffset;
+            const targetZ = posePosition.z;
+
+            shirt.position.x = lerp(shirt.position.x, targetX, lerpFactor);
+            shirt.position.y = lerp(shirt.position.y, targetY, lerpFactor);
+            shirt.position.z = lerp(shirt.position.z, targetZ, lerpFactor);
+
+            // Update scale with bounds checking
+            const targetScale = Math.max(0.5, Math.min(2.5, posePosition.scale * currentScale));
+            const currentShirtScale = shirt.scale.x;
+            const newScale = lerp(currentShirtScale, targetScale, lerpFactor);
+            shirt.scale.set(newScale, newScale, newScale);
+
+            // Update rotation with enhanced smoothing
+            if (posePosition.rotation) {
+                shirt.rotation.z = lerp(shirt.rotation.z, posePosition.rotation.z, lerpFactor * 0.8);
+            }
+        }
+
+        // Linear interpolation helper
+        function lerp(start, end, factor) {
+            return start + (end - start) * factor;
+        }
+
+        // Check camera status
+        function checkCameraStatus() {
+            fetch('/camera_status')
+                .then(response => response.json())
+                .then(data => {
+                    const startBtn = document.getElementById('startBtn');
+                    const stopBtn = document.getElementById('stopBtn');
+                    const shirtColorText = document.getElementById('shirtColorText');
+
+                    if (data.camera_active) {
+                        startBtn.disabled = true;
+                        stopBtn.disabled = false;
+                    } else {
+                        startBtn.disabled = !data.images_uploaded;
+                        stopBtn.disabled = true;
+                    }
+
+                    // Update shirt color display
+                    if (data.shirt_color) {
+                        detectedShirtColor = data.shirt_color.hex;
+                        const [r, g, b] = data.shirt_color.rgb;
+                        shirtColorText.textContent = `RGB(${r}, ${g}, ${b})`;
+                        shirtColorText.style.color = `rgb(${r}, ${g}, ${b})`;
+                        document.getElementById('colorCard').className = 'status-card active';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking camera status:', error);
+                });
+        }
+
+        function updateProgress(step, message) {
+            loadingSteps = step;
+            const progress = (loadingSteps / totalSteps) * 100;
+            document.getElementById('progress-fill').style.width = progress + '%';
+            document.getElementById('loading-text').textContent = message;
+
+            if (step >= totalSteps) {
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                }, 500);
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('error-message').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+
+            setTimeout(() => {
+                document.getElementById('error-message').style.display = 'none';
+            }, 6000);
+        }
+
+        // Enhanced camera setup
+        async function initCamera() {
+            try {
+                updateProgress(1, 'Accessing camera with enhanced GLB settings...');
+
+                const constraints = {
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 1280, min: 640 },
+                        height: { ideal: 720, min: 480 },
+                        frameRate: { ideal: 30, min: 20 }
+                    }
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+
+                video.onloadedmetadata = () => {
+                    updateProgress(2, 'Camera ready - Enhanced GLB detection systems online...');
+                };
+
+            } catch (err) {
+                console.error("Camera error: ", err);
+                showError("Camera access denied. Please allow camera permissions and refresh the page.");
+            }
+        }
+
+        // Enhanced Three.js initialization with GLB support
+        function initThreeJS() {
+            try {
+                updateProgress(4, 'Initializing enhanced 3D graphics with GLB rendering...');
+
+                // Scene setup
+                scene = new THREE.Scene();
+
+                // Camera setup - optimized for AR
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                camera.position.set(0, 0, 2.5);
+
+                // Enhanced renderer setup
+                renderer = new THREE.WebGLRenderer({
+                    antialias: true,
+                    alpha: true,
+                    powerPreference: "high-performance"
+                });
+
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                renderer.outputEncoding = THREE.sRGBEncoding;
+                renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                renderer.toneMappingExposure = 1.3;
+
+                document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+                // Enhanced lighting system
+                setupAdvancedLighting();
+
+                clock = new THREE.Clock();
+
+                // Load the GLB model
+                loadGLBModel();
+
+                // Event listeners
+                window.addEventListener('resize', onWindowResize);
+
+                // Start render loop
+                animate();
+
+            } catch (error) {
+                console.error("Three.js initialization error:", error);
+                showError("Failed to initialize enhanced GLB 3D graphics. Please refresh and try again.");
+            }
+        }
+
+        function setupAdvancedLighting() {
+            // Ambient light for overall illumination
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            // Main directional light
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight.position.set(3, 4, 6);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // Fill light from the left
+            const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            fillLight.position.set(-4, 2, 3);
+            scene.add(fillLight);
+
+            // Rim light for definition
+            const rimLight = new THREE.DirectionalLight(0xffffff, 0.4);
+            rimLight.position.set(0, -2, -4);
+            scene.add(rimLight);
+
+            // Additional soft light for realism
+            const softLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+            scene.add(softLight);
+        }
+
+        function loadGLBModel() {
+            // Create enhanced fallback shirt immediately
+            createEnhancedSmartShirt();
+
+            // Try to load GLB model
+            if (typeof THREE.GLTFLoader !== 'undefined') {
+                const loader = new THREE.GLTFLoader();
+
+                loader.load(
+                    '/static/models/t_shirt.glb',
+                    function (gltf) {
+                        // Replace fallback with loaded GLB model
+                        if (shirt) {
+                            scene.remove(shirt);
+                        }
+
+                        shirt = gltf.scene;
+                        setupGLBShirtMaterial(shirt);
+                        positionSmartShirt(shirt);
+                        scene.add(shirt);
+
+                        updateProgress(5, 'Enhanced smart GLB AR experience ready - All systems online!');
+                        console.log('✅ Enhanced GLB model loaded successfully');
+                    },
+                    function (xhr) {
+                        if (xhr.lengthComputable) {
+                            const percentLoaded = (xhr.loaded / xhr.total) * 20 + 80;
+                            document.getElementById('loading-text').textContent = `Loading enhanced GLB model... ${Math.round(percentLoaded)}%`;
+                        }
+                    },
+                    function (error) {
+                        console.warn('⚠️ Failed to load GLB model, using enhanced fallback:', error);
+                        updateProgress(5, 'Enhanced smart AR ready with optimized fallback model!');
+                    }
+                );
+            } else {
+                console.warn('⚠️ GLTFLoader not available, using enhanced fallback');
+                updateProgress(5, 'Enhanced smart AR ready with optimized fallback model!');
+            }
+        }
+
+        function createEnhancedSmartShirt() {
+            const group = new THREE.Group();
+
+            // Main body with more realistic proportions
+            const bodyGeometry = new THREE.CylinderGeometry(0.95, 1.15, 1.5, 16, 2);
+            bodyGeometry.scale(1, 1, 0.8); // Make it less thick
+            const body = new THREE.Mesh(bodyGeometry);
+
+            // Enhanced sleeves with better shape
+            const sleeveGeometry = new THREE.CylinderGeometry(0.28, 0.38, 0.8, 12, 1);
+            const leftSleeve = new THREE.Mesh(sleeveGeometry);
+            leftSleeve.position.set(-0.9, 0.2, 0);
+            leftSleeve.rotation.z = Math.PI / 2;
+            leftSleeve.rotation.x = 0.1;
+
+            const rightSleeve = new THREE.Mesh(sleeveGeometry);
+            rightSleeve.position.set(0.9, 0.2, 0);
+            rightSleeve.rotation.z = -Math.PI / 2;
+            rightSleeve.rotation.x = -0.1;
+
+            // Improved neckline
+            const neckGeometry = new THREE.TorusGeometry(0.35, 0.12, 12, 20);
+            const neck = new THREE.Mesh(neckGeometry);
+            neck.position.set(0, 0.7, 0.05);
+            neck.rotation.x = Math.PI / 2;
+
+            // Add subtle details
+            const hemGeometry = new THREE.TorusGeometry(1.15, 0.05, 8, 16);
+            const hem = new THREE.Mesh(hemGeometry);
+            hem.position.set(0, -0.7, 0);
+            hem.rotation.x = Math.PI / 2;
+
+            group.add(body);
+            group.add(leftSleeve);
+            group.add(rightSleeve);
+            group.add(neck);
+            group.add(hem);
+
+            // Smart material with detected color
+            const meshColor = detectedShirtColor ? detectedShirtColor : colors[currentColorIndex];
+            const material = new THREE.MeshPhongMaterial({
+                color: meshColor,
+                specular: 0x333333,
+                shininess: 80,
+                transparent: true,
+                opacity: currentOpacity,
+                side: THREE.DoubleSide,
+                flatShading: false
+            });
+
+            group.traverse(function (child) {
+                if (child.isMesh) {
+                    child.material = material;
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+
+            shirt = group;
+            positionSmartShirt(shirt);
+            scene.add(shirt);
+        }
+
+        function setupGLBShirtMaterial(shirtObject) {
+            const meshColor = detectedShirtColor ? detectedShirtColor : colors[currentColorIndex];
+
+            shirtObject.traverse(function (child) {
+                if (child.isMesh) {
+                    // Preserve original material if it exists, but update color
+                    if (child.material) {
+                        child.material.color.setHex(meshColor);
+                        child.material.transparent = true;
+                        child.material.opacity = currentOpacity;
+                    } else {
+                        child.material = new THREE.MeshPhongMaterial({
+                            color: meshColor,
+                            specular: 0x333333,
+                            shininess: 80,
+                            transparent: true,
+                            opacity: currentOpacity,
+                            side: THREE.DoubleSide,
+                            flatShading: false
+                        });
+                    }
+
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+        }
+
+        function positionSmartShirt(shirtObject) {
+            shirtObject.scale.set(currentScale, currentScale, currentScale);
+            shirtObject.position.set(currentXOffset, currentYOffset, 0);
+            shirtObject.rotation.set(0, 0, 0);
+        }
+
+        function onWindowResize() {
+            if (camera && renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+
+        // Enhanced AR control functions
+        function toggleRotation() {
+            isRotating = !isRotating;
+            document.getElementById('rotateBtn').textContent = isRotating ? 'Stop Rotation' : 'Start Rotation';
+        }
+
+        function toggleAutoScale() {
+            autoScaleEnabled = !autoScaleEnabled;
+            document.getElementById('scaleBtn').textContent = autoScaleEnabled ? 'Manual Scale' : 'Auto Scale';
+
+            if (!autoScaleEnabled && shirt) {
+                shirt.scale.set(currentScale, currentScale, currentScale);
+                shirt.position.set(currentXOffset, currentYOffset, 0);
+            }
+        }
+
+        function resetPosition() {
+            if (shirt) {
+                shirt.rotation.set(0, 0, 0);
+                shirt.position.set(0, 0, 0);
+                shirt.scale.set(1.0, 1.0, 1.0);
+
+                currentScale = 1.0;
+                currentXOffset = 0;
+                currentYOffset = 0;
+
+                // Reset sliders
+                document.getElementById('scale').value = 1.0;
+                document.getElementById('xPosition').value = 0;
+                document.getElementById('yPosition').value = 0;
+                document.getElementById('scaleValue').textContent = '1.0';
+                document.getElementById('xValue').textContent = '0';
+                document.getElementById('yValue').textContent = '0';
+
+                // Reset to detected color if available
+                if (detectedShirtColor && shirt) {
+                    updateShirtColor(detectedShirtColor);
+                }
+            }
+        }
+
+        function changeColor() {
+            currentColorIndex = (currentColorIndex + 1) % colors.length;
+            const colorToUse = currentColorIndex === 0 && detectedShirtColor ? detectedShirtColor : colors[currentColorIndex];
+            updateShirtColor(colorToUse);
+        }
+
+        function updateShirtColor(color) {
+            if (shirt) {
+                shirt.traverse(function (child) {
+                    if (child.isMesh && child.material) {
+                        child.material.color.setHex(color);
+                        child.material.needsUpdate = true;
+                    }
+                });
+            }
+        }
+
+        function updateScale(e) {
+            currentScale = parseFloat(e.target.value);
+            if (shirt && !autoScaleEnabled) {
+                shirt.scale.set(currentScale, currentScale, currentScale);
+            }
+        }
+
+        function updateOpacity(e) {
+            currentOpacity = parseFloat(e.target.value);
+            if (shirt) {
+                shirt.traverse(function (child) {
+                    if (child.isMesh && child.material) {
+                        child.material.opacity = currentOpacity;
+                        child.material.needsUpdate = true;
+                    }
+                });
+            }
+        }
+
+        function updateXOffset(e) {
+            currentXOffset = parseFloat(e.target.value);
+            if (shirt && !autoScaleEnabled) {
+                shirt.position.x = currentXOffset;
+            }
+        }
+
+        function updateYOffset(e) {
+            currentYOffset = parseFloat(e.target.value);
+            if (shirt && !autoScaleEnabled) {
+                shirt.position.y = currentYOffset;
+            }
+        }
+
+        // Optimized animation loop with enhanced smoothness
+        let lastTime = 0;
+        const targetFPS = 60;
+        const frameTime = 1000 / targetFPS;
+
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+
+            const deltaTime = currentTime - lastTime;
+            if (deltaTime < frameTime) return;
+
+            lastTime = currentTime - (deltaTime % frameTime);
+
+            if (shirt && isRotating) {
+                shirt.rotation.y += 0.008;
+            }
+
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        function cleanupAR() {
+            // Stop camera stream
+            const video = document.getElementById('video');
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+
+            // Clean up Three.js resources
+            if (renderer) {
+                renderer.dispose();
+                const container = document.getElementById('canvas-container');
+                if (container && container.contains(renderer.domElement)) {
+                    container.removeChild(renderer.domElement);
+                }
+            }
+
+            if (scene) {
+                scene.traverse(object => {
+                    if (object.isMesh) {
+                        if (object.geometry) object.geometry.dispose();
+                        if (object.material) {
+                            if (Array.isArray(object.material)) {
+                                object.material.forEach(material => material.dispose());
+                            } else {
+                                object.material.dispose();
+                            }
+                        }
+                    }
+                });
+                scene = null;
+            }
+
+            camera = null;
+            shirt = null;
+            clock = null;
+            renderer = null;
+
+            // Hide AR controls
+            document.getElementById('ar-controls').classList.remove('active');
+            document.getElementById('position-controls').classList.remove('active');
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', function () {
+            if (camera && renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+    </script>
+</body>
+
+</html>
