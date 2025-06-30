@@ -63,6 +63,4 @@ Imagine you're browsing an online store and want to see how a particular shirt l
 • Better fabric simulation (wrinkles, folds, draping)
 • Size fitting based on body proportions
 • Integration with online clothing stores
-• Save snapshot of try-on view
-• Voice-guided assistance
 
