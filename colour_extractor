@@ -1,0 +1,1004 @@
+import cv2
+import numpy as np
+from ultralytics import YOLO
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+from scipy.spatial import KDTree
+from rembg import remove
+from skimage.feature import local_binary_pattern
+import os
+import pyvista as pv
+import tempfile
+from collections import defaultdict
+from PIL import Image
+import torch
+from torchvision import transforms
+import pytesseract
+from sklearn.metrics.pairwise import cosine_similarity
+import hashlib
+from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers import pipeline
+import warnings
+from pyntcloud import PyntCloud
+import pandas as pd
+from sklearn.decomposition import PCA
+import open3d as o3d
+from matplotlib import cm
+from mpl_toolkits.mplot3d import Axes3D
+from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+
+# Suppress warnings
+warnings.filterwarnings("ignore")
+
+# Define initialization functions first
+def initialize_sam_model(sam_checkpoint_path="sam_vit_h_4b8939.pth", model_type="vit_h"):
+    """Initialize SAM model with better error handling"""
+    sam = None
+    mask_generator = None
+
+    if not os.path.exists(sam_checkpoint_path):
+        print(f"[WARNING] SAM checkpoint not found at {sam_checkpoint_path}")
+        return None, None
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    try:
+        sam = sam_model_registry[model_type](checkpoint=sam_checkpoint_path)
+        sam.to(device=device)
+        mask_generator = SamAutomaticMaskGenerator(
+            model=sam,
+            points_per_side=32,
+            pred_iou_thresh=0.9,
+            stability_score_thresh=0.92,
+            crop_n_layers=1,
+            crop_n_points_downscale_factor=2,
+            min_mask_region_area=100
+        )
+        print("SAM model initialized successfully")
+    except Exception as e:
+        print(f"[ERROR] Initializing SAM: {e}")
+        return None, None
+
+    return sam, mask_generator
+
+def initialize_text_detector():
+    """Initialize text detection model"""
+    text_detector = None
+    hf_device = 0 if torch.cuda.is_available() else -1
+
+    try:
+        text_detector = pipeline("object-detection",
+                               model="microsoft/table-transformer-detection",
+                               device=hf_device)
+    except Exception as e:
+        print(f"Error initializing text detector: {e}")
+
+    return text_detector
+
+def initialize_pattern_recognition_model():
+    """Initialize pattern recognition model"""
+    try:
+        processor = AutoImageProcessor.from_pretrained("nateraw/vit-base-patch16-224-clothing-pattern")
+        model = AutoModelForImageClassification.from_pretrained("nateraw/vit-base-patch16-224-clothing-pattern")
+        return processor, model
+    except Exception as e:
+        print(f"Error initializing pattern model: {e}")
+        return None, None
+
+def initialize_pointnet_model():
+    """Initialize PointNet model"""
+    try:
+        from kaolin.models.PointNet import PointNetClassifier
+        model = PointNetClassifier(num_classes=10)
+        return model
+    except Exception as e:
+        print(f"Error initializing PointNet: {e}")
+        return None
+
+# Initialize global variables
+sam, mask_generator = initialize_sam_model()
+text_detector = initialize_text_detector()
+pattern_processor, pattern_model = initialize_pattern_recognition_model()
+pointnet = initialize_pointnet_model()
+
+class ColorNamer:
+    def __init__(self):
+        # Comprehensive fashion color dictionary with precise RGB values
+        self.color_dict = {
+            # Reds
+            'red': (255, 0, 0),
+            'scarlet': (255, 36, 0),
+            'crimson': (220, 20, 60),
+            'ruby': (224, 17, 95),
+            'cherry': (222, 49, 99),
+            'raspberry': (227, 11, 93),
+            'wine': (114, 47, 55),
+            'burgundy': (128, 0, 32),
+            'maroon': (128, 0, 0),
+            'candy apple': (255, 8, 0),
+
+            # Pinks
+            'pink': (255, 192, 203),
+            'hot pink': (255, 105, 180),
+            'fuchsia': (255, 0, 255),
+            'rose': (255, 102, 204),
+            'blush': (222, 93, 131),
+            'watermelon': (252, 108, 133),
+            'salmon': (250, 128, 114),
+            'coral': (255, 127, 80),
+            'peach': (255, 218, 185),
+            'strawberry': (252, 90, 141),
+
+            # Oranges
+            'orange': (255, 165, 0),
+            'tangerine': (255, 204, 0),
+            'pumpkin': (255, 117, 24),
+            'amber': (255, 191, 0),
+            'rust': (183, 65, 14),
+            'copper': (184, 115, 51),
+            'terracotta': (226, 114, 91),
+            'cinnamon': (210, 105, 30),
+            'apricot': (251, 206, 177),
+            'bronze': (205, 127, 50),
+
+            # Yellows
+            'yellow': (255, 255, 0),
+            'gold': (255, 215, 0),
+            'lemon': (255, 247, 0),
+            'mustard': (255, 219, 88),
+            'honey': (235, 150, 5),
+            'daffodil': (255, 255, 49),
+            'sunflower': (255, 218, 3),
+            'bumblebee': (254, 225, 4),
+            'goldenrod': (218, 165, 32),
+            'saffron': (244, 196, 48),
+
+            # Greens
+            'green': (0, 128, 0),
+            'emerald': (80, 200, 120),
+            'lime': (0, 255, 0),
+            'olive': (128, 128, 0),
+            'forest': (34, 139, 34),
+            'mint': (189, 252, 201),
+            'sage': (188, 184, 138),
+            'jade': (0, 168, 107),
+            'pear': (209, 226, 49),
+            'pistachio': (147, 197, 114),
+
+            # Blues
+            'blue': (0, 0, 255),
+            'navy': (0, 0, 128),
+            'sky': (135, 206, 235),
+            'royal': (65, 105, 225),
+            'teal': (0, 128, 128),
+            'turquoise': (64, 224, 208),
+            'aqua': (0, 255, 255),
+            'cobalt': (0, 71, 171),
+            'sapphire': (15, 82, 186),
+            'denim': (21, 96, 189),
+
+            # Purples
+            'purple': (128, 0, 128),
+            'violet': (238, 130, 238),
+            'lavender': (230, 230, 250),
+            'lilac': (200, 162, 200),
+            'plum': (221, 160, 221),
+            'orchid': (218, 112, 214),
+            'amethyst': (153, 102, 204),
+            'grape': (111, 45, 168),
+            'eggplant': (97, 64, 81),
+            'iris': (93, 63, 211),
+
+            # Browns
+            'brown': (165, 42, 42),
+            'chocolate': (210, 105, 30),
+            'caramel': (255, 213, 154),
+            'tan': (210, 180, 140),
+            'beige': (245, 245, 220),
+            'khaki': (240, 230, 140),
+            'taupe': (72, 60, 50),
+            'mocha': (150, 120, 90),
+            'espresso': (97, 64, 81),
+            'cappuccino': (227, 207, 190),
+
+            # Grays/Blacks/Whites
+            'black': (0, 0, 0),
+            'white': (255, 255, 255),
+            'gray': (128, 128, 128),
+            'silver': (192, 192, 192),
+            'charcoal': (54, 69, 79),
+            'slate': (112, 128, 144),
+            'pearl': (234, 224, 200),
+            'ivory': (255, 255, 240),
+            'cream': (255, 253, 208),
+            'eggshell': (240, 234, 214)
+        }
+
+        # Create KDTree for nearest neighbor search
+        self.colors = np.array(list(self.color_dict.values()))
+        self.color_names = list(self.color_dict.keys())
+        self.kdtree = KDTree(self.colors)
+
+    def get_closest_color_name(self, rgb_color):
+        """Find the closest named color for the given RGB value with distance threshold"""
+        rgb_color = np.array(rgb_color)
+        if rgb_color.max() > 1:  # Scale to 0-1 if needed
+            rgb_color = rgb_color / 255.0
+
+        scaled_color = rgb_color * 255
+        distance, index = self.kdtree.query(scaled_color)
+        max_distance = 30  # Maximum allowed color distance
+
+        if distance > max_distance:
+            # If no close match, return approximate color name
+            r, g, b = scaled_color
+            if r > g and r > b:
+                return "reddish" if r > 200 else "dark reddish"
+            elif g > r and g > b:
+                return "greenish" if g > 200 else "dark greenish"
+            elif b > r and b > g:
+                return "bluish" if b > 200 else "dark bluish"
+            elif r == g == b:
+                return "gray" if r > 100 else "dark gray"
+            else:
+                return "custom color"
+        return self.color_names[index]
+
+class TextureAnalyzer:
+    def __init__(self):
+        self.pattern_types = [
+            'plain', 'striped', 'checkered', 'floral',
+            'polka dot', 'geometric', 'abstract', 'camo',
+            'animal print', 'paisley', 'chevron', 'houndstooth'
+        ]
+
+    def analyze_texture(self, image):
+        """Advanced texture analysis using multiple methods"""
+        if pattern_processor and pattern_model:
+            try:
+                # Use transformer model if available
+                inputs = pattern_processor(images=image, return_tensors="pt")
+                outputs = pattern_model(**inputs)
+                logits = outputs.logits
+                predicted_class_idx = logits.argmax(-1).item()
+                return pattern_model.config.id2label[predicted_class_idx]
+            except Exception as e:
+                print(f"Pattern recognition model failed: {e}")
+
+        # Fallback to traditional methods
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # LBP for texture analysis
+        radius = 3
+        n_points = 8 * radius
+        lbp = local_binary_pattern(gray, n_points, radius, method='uniform')
+        hist, _ = np.histogram(lbp.ravel(), bins=np.arange(0, n_points + 3), range=(0, n_points + 2))
+        hist = hist.astype("float")
+        hist /= (hist.sum() + 1e-7)
+
+        # Fourier transform for pattern regularity
+        fft = np.fft.fft2(gray)
+        fft_shift = np.fft.fftshift(fft)
+        magnitude_spectrum = 20 * np.log(np.abs(fft_shift + 1e-10))
+
+        # Edge detection for pattern type
+        edges = cv2.Canny(gray, 50, 150)
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=30, maxLineGap=10)
+
+        # Determine pattern type based on features
+        if lines is not None and len(lines) > 15:
+            angles = []
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                angle = np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi
+                angles.append(angle)
+
+            angles = np.array(angles)
+            horizontal = np.sum((angles > -15) & (angles < 15))
+            vertical = np.sum((angles > 75) | (angles < -75))
+
+            if horizontal > vertical and horizontal > 10:
+                return "horizontal stripes"
+            elif vertical > horizontal and vertical > 10:
+                return "vertical stripes"
+            else:
+                return "geometric pattern"
+        elif np.max(magnitude_spectrum) > 120 and np.std(hist) < 0.1:
+            return "regular texture"
+        elif np.sum(edges) / edges.size > 0.15:
+            return "irregular pattern"
+        else:
+            return "plain"
+
+class GarmentReconstructor:
+    def __init__(self, template_path=None):
+        self.template_mesh = self.load_template_mesh(template_path)
+
+    def load_template_mesh(self, template_path):
+        """Load a template garment mesh for reconstruction"""
+        try:
+            if template_path and os.path.exists(template_path):
+                # Load custom OBJ file
+                mesh = pv.read(template_path)
+                print(f"Successfully loaded custom template from {template_path}")
+                return mesh
+            else:
+                # Create a simple parametric shirt model as fallback
+                mesh = pv.ParametricRandomHills().scale([0.5, 0.5, 0.3], inplace=True)
+                mesh.rotate_x(90, inplace=True)
+                print("Using parametric template as fallback")
+                return mesh
+        except Exception as e:
+            print(f"Error loading template mesh: {e}")
+            # Fallback to simple geometry
+            return pv.Cylinder(radius=0.5, height=1.5, direction=(0, 0, 1))
+
+    def reconstruct_from_images(self, images):
+        """Reconstruct 3D garment from multiple views"""
+        if len(images) < 3:
+            print("Need at least 3 views for reconstruction")
+            return self.template_mesh
+
+        try:
+            # Feature extraction and matching
+            sift = cv2.SIFT_create()
+            keypoints = []
+            descriptors = []
+
+            for img in images:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                kp, des = sift.detectAndCompute(gray, None)
+                keypoints.append(kp)
+                descriptors.append(des)
+
+            # Match features between views
+            bf = cv2.BFMatcher()
+            matches = bf.knnMatch(descriptors[0], descriptors[1], k=2)
+
+            # Apply ratio test
+            good_matches = []
+            for m,n in matches:
+                if m.distance < 0.75*n.distance:
+                    good_matches.append(m)
+
+            if len(good_matches) < 10:
+                print("Not enough matches for reconstruction")
+                return self.template_mesh
+
+            # Estimate fundamental matrix
+            pts0 = np.float32([keypoints[0][m.queryIdx].pt for m in good_matches]).reshape(-1,1,2)
+            pts1 = np.float32([keypoints[1][m.trainIdx].pt for m in good_matches]).reshape(-1,1,2)
+
+            F, mask = cv2.findFundamentalMat(pts0, pts1, cv2.FM_RANSAC)
+
+            # We select only inlier points
+            pts0 = pts0[mask.ravel()==1]
+            pts1 = pts1[mask.ravel()==1]
+
+            # Camera calibration (simplified)
+            K = np.array([[800, 0, images[0].shape[1]/2],
+                         [0, 800, images[0].shape[0]/2],
+                         [0, 0, 1]])
+
+            # Essential matrix
+            E = K.T @ F @ K
+
+            # Recover pose
+            _, R, t, _ = cv2.recoverPose(E, pts0, pts1, K)
+
+            # Triangulate points (simplified)
+            proj1 = np.hstack((np.eye(3), np.zeros((3,1))))
+            proj2 = np.hstack((R, t))
+
+            pts0 = pts0.reshape(-1,2).T
+            pts1 = pts1.reshape(-1,2).T
+
+            points_4d = cv2.triangulatePoints(proj1, proj2, pts0, pts1)
+            points_3d = points_4d[:3]/points_4d[3]
+
+            # Create point cloud
+            point_cloud = pv.PolyData(points_3d.T)
+
+            # Fit template mesh to point cloud
+            warped_mesh = self.template_mesh.warp_by_vector(point_cloud)
+
+            return warped_mesh
+
+        except Exception as e:
+            print(f"3D reconstruction failed: {e}")
+            return self.template_mesh
+
+def remove_background_advanced(image):
+    """Advanced background removal using SAM or rembg"""
+    if mask_generator:
+        try:
+            # Use SAM for high-quality segmentation
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            masks = mask_generator.generate(image_rgb)
+
+            if masks:
+                # Get the largest mask
+                masks = sorted(masks, key=(lambda x: x['area']), reverse=True)
+                mask = masks[0]['segmentation']
+                mask = mask.astype(np.uint8) * 255
+
+                # Refine mask edges
+                kernel = np.ones((3,3), np.uint8)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+                foreground = cv2.bitwise_and(image, image, mask=mask)
+                return foreground, mask
+        except Exception as e:
+            print(f"SAM background removal failed: {e}")
+
+    # Fallback to rembg
+    try:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        result = remove(image_rgb)
+        result = cv2.cvtColor(result, cv2.COLOR_RGBA2BGRA)
+        mask = result[:, :, 3]
+        foreground = cv2.bitwise_and(image, image, mask=mask)
+        return foreground, mask
+    except Exception as e:
+        print(f"Rembg background removal failed: {e}")
+        # Fallback to simple thresholding
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
+        foreground = cv2.bitwise_and(image, image, mask=mask)
+        return foreground, mask
+
+def extract_dominant_colors_advanced(image, mask=None, n_colors=5):
+    """Enhanced color extraction with adaptive clustering and color naming"""
+    try:
+        if mask is None:
+            _, mask = remove_background_advanced(image)
+
+        masked_image = cv2.bitwise_and(image, image, mask=mask)
+
+        # Resize for faster processing while preserving aspect ratio
+        height, width = masked_image.shape[:2]
+        new_height = 300
+        new_width = int(width * (new_height / height))
+        resized = cv2.resize(masked_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+
+        # Convert to LAB color space for better clustering
+        lab_image = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
+        pixels = lab_image.reshape(-1, 3)
+        pixels = pixels[np.all(pixels != [0, 0, 0], axis=1)]  # Remove black pixels
+
+        if len(pixels) < n_colors:
+            n_colors = max(1, len(pixels) // 10)
+
+        if len(pixels) == 0:
+            return [np.array([0, 0, 0])], [1], ['black']
+
+        # Use elbow method to determine optimal number of clusters
+        distortions = []
+        max_clusters = min(10, len(pixels))
+
+        for k in range(1, max_clusters + 1):
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+            kmeans.fit(pixels)
+            distortions.append(kmeans.inertia_)
+
+        # Find the elbow point
+        diffs = np.diff(distortions)
+        second_diffs = np.diff(diffs)
+        if len(second_diffs) > 0:
+            optimal_k = np.argmax(second_diffs) + 2
+        else:
+            optimal_k = min(3, max_clusters)
+
+        optimal_k = max(1, min(optimal_k, n_colors))
+
+        # Final clustering
+        kmeans = KMeans(n_clusters=optimal_k, random_state=42, n_init=20)
+        kmeans.fit(pixels)
+
+        # Convert LAB centers back to BGR
+        colors_bgr = []
+        for center in kmeans.cluster_centers_:
+            lab = np.uint8([[center]])
+            bgr = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)[0][0]
+            colors_bgr.append(bgr)
+
+        colors_bgr = np.array(colors_bgr)
+        counts = np.bincount(kmeans.labels_)
+
+        # Merge similar colors
+        unique_colors = []
+        unique_counts = []
+        color_namer = ColorNamer()
+        color_threshold = 30  # Color difference threshold for merging
+
+        for color, count in zip(colors_bgr, counts):
+            color_rgb = tuple(color[::-1])
+            is_unique = True
+
+            for i, (ucolor, _) in enumerate(zip(unique_colors, unique_counts)):
+                if np.linalg.norm(color - ucolor) < color_threshold:
+                    unique_counts[i] += count
+                    is_unique = False
+                    break
+
+            if is_unique:
+                unique_colors.append(color)
+                unique_counts.append(count)
+
+        # Sort by prevalence
+        sorted_indices = np.argsort(unique_counts)[::-1]
+        unique_colors = np.array(unique_colors)[sorted_indices]
+        unique_counts = np.array(unique_counts)[sorted_indices]
+
+        # Calculate percentages
+        total = sum(unique_counts)
+        percentages = [count/total*100 for count in unique_counts]
+
+        # Get color names
+        color_names = []
+        for color in unique_colors:
+            color_rgb = tuple(color[::-1])
+            color_names.append(color_namer.get_closest_color_name(color_rgb))
+
+        return unique_colors, unique_counts, color_names
+
+    except Exception as e:
+        print(f"Error in color extraction: {e}")
+        # Return default values if something goes wrong
+        return [np.array([0, 0, 0])], [1], ['black']
+
+def detect_text_and_graphics(image, mask=None):
+    """Advanced text and graphic element detection"""
+    try:
+        if mask is None:
+            _, mask = remove_background_advanced(image)
+
+        masked_image = cv2.bitwise_and(image, image, mask=mask)
+        pil_image = Image.fromarray(cv2.cvtColor(masked_image, cv2.COLOR_BGR2RGB))
+
+        # OCR with Tesseract
+        custom_config = r'--oem 3 --psm 6'
+        text = pytesseract.image_to_string(pil_image, config=custom_config).strip()
+
+        # Text detection with transformer model
+        has_text = False
+        text_boxes = []
+
+        if text_detector is not None:
+            try:
+                text_boxes = text_detector(pil_image)
+                has_text = len(text_boxes) > 0
+            except Exception as e:
+                print(f"Error in text detection: {e}")
+                has_text = False
+
+        # Graphic detection using edge density and contour analysis
+        gray = cv2.cvtColor(masked_image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = np.sum(edges) / np.sum(mask) if np.sum(mask) > 0 else 0
+
+        # Contour analysis for graphic elements
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        large_contours = [c for c in contours if cv2.contourArea(c) > 100]
+
+        has_graphic = (edge_density > 0.1) and (len(large_contours) > 2)
+
+        # Meaningful text check
+        meaningful_text = False
+        if text:
+            words = text.split()
+            for word in words:
+                if len(word) >= 3 and word.isalpha():
+                    meaningful_text = True
+                    break
+
+        return {
+            'has_text': has_text or meaningful_text,
+            'detected_text': text if meaningful_text else None,
+            'has_graphic': has_graphic and not meaningful_text,
+            'text_confidence': len(text_boxes) if has_text else 0,
+            'graphic_contours': large_contours
+        }
+    except Exception as e:
+        print(f"Error in text/graphic detection: {e}")
+        return {
+            'has_text': False,
+            'detected_text': None,
+            'has_graphic': False,
+            'text_confidence': 0,
+            'graphic_contours': []
+        }
+
+def generate_image_fingerprint(image):
+    """Generate a fingerprint for image similarity comparison"""
+    try:
+        # Resize image to standard size
+        resized = cv2.resize(image, (256, 256))
+
+        # Compute color histogram (HSV space)
+        hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+        hist = cv2.normalize(hist, hist).flatten()
+
+        # Compute perceptual hash
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        resized_gray = cv2.resize(gray, (32, 32))
+        avg = resized_gray.mean()
+        phash = (resized_gray > avg).astype(int)
+
+        return {
+            'histogram': hist,
+            'phash': phash
+        }
+    except Exception as e:
+        print(f"Error generating image fingerprint: {e}")
+        return {
+            'histogram': np.zeros(512),
+            'phash': np.zeros((32, 32))
+        }
+
+
+
+def analyze_garment_features(image_paths, yolo_model, class_names, template_path=None,
+                           mask_generator=None, text_detector=None,
+                           pattern_processor=None, pattern_model=None):
+    try:
+        # Load and process all images
+        images = []
+        detections = []
+
+        for path in image_paths:
+            image = cv2.imread(path)
+            if image is None:
+                print(f"Could not read image: {path}")
+                continue
+
+            # Run YOLO detection
+            results = yolo_model(image)
+
+            for result in results:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    cls_id = int(box.cls)
+                    confidence = float(box.conf)
+                    class_name = class_names[cls_id] if cls_id < len(class_names) else f"class_{cls_id}"
+
+                    # Crop detected garment
+                    cropped = image[y1:y2, x1:x2]
+                    if cropped.size == 0:
+                        continue
+
+                    # Remove background
+                    foreground, mask = remove_background_advanced(cropped)
+
+                    # Extract features
+                    colors, counts, color_names = extract_dominant_colors_advanced(foreground, mask)
+                    texture_analyzer = TextureAnalyzer()
+                    pattern = texture_analyzer.analyze_texture(foreground)
+                    text_info = detect_text_and_graphics(foreground, mask)
+                    multi_colored = len(colors) > 1 and (max(counts)/sum(counts) < 0.7)
+
+                    # Get dominant color
+                    dominant_idx = np.argmax(counts)
+                    dominant_color = colors[dominant_idx]
+                    dominant_name = color_names[dominant_idx]
+
+                    # Store detection
+                    detections.append({
+                        'image_path': path,
+                        'class_name': class_name,
+                        'confidence': confidence,
+                        'colors': colors,
+                        'color_names': color_names,
+                        'counts': counts,
+                        'pattern': pattern,
+                        'dominant_color': dominant_color,
+                        'dominant_name': dominant_name,
+                        'multi_colored': multi_colored,
+                        'has_text': text_info['has_text'],
+                        'has_graphic': text_info['has_graphic'],
+                        'detected_text': text_info['detected_text'],
+                        'foreground': foreground,
+                        'mask': mask
+                    })
+
+                    images.append(foreground)
+
+        if not detections:
+            return None
+
+        # Aggregate results across all views
+        all_colors = np.vstack([d['colors'] for d in detections])
+        all_counts = np.concatenate([d['counts'] for d in detections])
+
+        # Recluster all colors to get final palette
+        if len(all_colors) > 5:
+            kmeans = KMeans(n_clusters=5, random_state=42, n_init=20)
+            kmeans.fit(all_colors)
+            final_colors = kmeans.cluster_centers_
+            final_counts = np.bincount(kmeans.labels_, weights=all_counts)
+        else:
+            final_colors = all_colors
+            final_counts = all_counts
+
+        # Get final color names
+        color_namer = ColorNamer()
+        final_color_names = [color_namer.get_closest_color_name(tuple(c[::-1])) for c in final_colors]
+
+        # Determine most common pattern
+        patterns = [d['pattern'] for d in detections]
+        final_pattern = max(set(patterns), key=patterns.count)
+
+        # Combine text/graphic info
+        has_text = any(d['has_text'] for d in detections)
+        has_graphic = any(d['has_graphic'] for d in detections)
+        detected_texts = list(set(d['detected_text'] for d in detections if d['detected_text']))
+
+        # Get average dominant color
+        dominant_colors = np.array([d['dominant_color'] for d in detections])
+        final_dominant_color = np.median(dominant_colors, axis=0)
+        final_dominant_name = color_namer.get_closest_color_name(tuple(final_dominant_color[::-1]))
+
+        # 3D reconstruction with custom template
+        reconstructor = GarmentReconstructor(template_path)
+        reconstructed_mesh = reconstructor.reconstruct_from_images(images)
+
+        # Create visualization
+        plotter = pv.Plotter(off_screen=True, window_size=[400, 400])
+        color_rgb = final_dominant_color[::-1] / 255.0
+
+        if final_pattern == 'striped':
+            # Create striped texture
+            texture = np.zeros((100, 100, 3), dtype=np.uint8)
+            for i in range(100):
+                if i % 20 < 10:
+                    texture[i, :] = (final_dominant_color * 1.2).clip(0, 255)
+                else:
+                    texture[i, :] = (final_dominant_color * 0.8).clip(0, 255)
+            texture = pv.Texture(texture)
+            plotter.add_mesh(reconstructed_mesh, texture=texture)
+        elif has_text or has_graphic:
+            plotter.add_mesh(reconstructed_mesh, color=color_rgb)
+            if has_text:
+                text_color = (1, 1, 1) if np.mean(final_dominant_color) < 128 else (0, 0, 0)
+                plotter.add_text("TEXT", position=(0, 0, 0.5), color=text_color, font_size=30)
+            elif has_graphic:
+                plotter.add_mesh(pv.Sphere(radius=0.2, center=(0, 0, 0.3)), color=(1, 0, 0))
+        else:
+            plotter.add_mesh(reconstructed_mesh, color=color_rgb)
+
+        plotter.set_background([0.9, 0.9, 0.9])
+        plotter.camera_position = 'xy'
+        plotter.camera.azimuth = 30
+        plotter.camera.elevation = 20
+        plotter.camera.zoom(1.5)
+
+        # Create final result dictionary
+        result = {
+            'image_paths': image_paths,
+            'class_name': detections[0]['class_name'],  # Assuming same class for all
+            'confidence': np.mean([d['confidence'] for d in detections]),
+            'colors': final_colors,
+            'color_names': final_color_names,
+            'counts': final_counts,
+            'pattern': final_pattern,
+            'dominant_color': final_dominant_color,
+            'dominant_name': final_dominant_name,
+            'multi_colored': any(d['multi_colored'] for d in detections),
+            'has_text': has_text,
+            'has_graphic': has_graphic,
+            'detected_text': detected_texts[0] if detected_texts else None,
+            '3d_model': reconstructed_mesh,
+            '3d_plotter': plotter,
+            'original_images': [d['foreground'] for d in detections]
+        }
+
+        return result
+
+    except Exception as e:
+        print(f"Error analyzing garment features: {e}")
+        return None
+
+def visualize_analysis_results(results):
+    """Visualize the analysis results with original images, 3D model, and features"""
+    if not results:
+        print("No results to visualize")
+        return
+
+    num_results = len(results)
+    fig, axes = plt.subplots(num_results, 3, figsize=(18, 6*num_results))
+    if num_results == 1:
+        axes = axes.reshape(1, -1)  # Ensure 2D array for single result
+
+    # Temporary directory for 3D renders
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for i, result in enumerate(results):
+            ax1, ax2, ax3 = axes[i]
+
+            # Show first original image
+            first_image = result['original_images'][0]
+            ax1.imshow(cv2.cvtColor(first_image, cv2.COLOR_BGR2RGB))
+            ax1.set_title(f"Original: {result['class_name']} ({result['confidence']:.2f})", pad=10)
+            ax1.axis('off')
+
+            # Save and show 3D render
+            temp_img_path = os.path.join(temp_dir, f"3d_render_{i}.png")
+            result['3d_plotter'].screenshot(temp_img_path)
+            result['3d_plotter'].close()
+
+            img_3d = plt.imread(temp_img_path)
+            ax2.imshow(img_3d)
+
+            # Enhanced title with features
+            title = f"3D Model\nColor: {result['dominant_name'].title()}"
+            if result['multi_colored']:
+                title += " (Multi-Colored)"
+            title += f"\nPattern: {result['pattern']}"
+            if result['has_text']:
+                title += "\nContains Text"
+            if result['has_graphic']:
+                title += "\nContains Graphic"
+
+            ax2.set_title(title, pad=10)
+            ax2.axis('off')
+
+            # Color palette visualization
+            plot_color_palette(
+                [c[::-1] for c in result['colors']],
+                result['color_names'],
+                result['counts'],
+                ax3
+            )
+
+        plt.tight_layout()
+        plt.show()
+
+    # Print detailed information
+    for i, result in enumerate(results):
+        print(f"\n=== Product {i+1} ===")
+        print(f"Images: {', '.join(os.path.basename(p) for p in result['image_paths'])}")
+        print(f"Class: {result['class_name']}")
+        print(f"Confidence: {result['confidence']:.2f}")
+        print("Color Analysis:")
+        for color, name, count in zip(result['colors'], result['color_names'], result['counts']):
+            # Fix for the float color value issue
+            color_uint8 = np.clip(color, 0, 255).astype(np.uint8)
+            hex_color = f"#{color_uint8[2]:02x}{color_uint8[1]:02x}{color_uint8[0]:02x}"
+            percentage = count/sum(result['counts'])*100 if sum(result['counts']) > 0 else 0
+            print(f"  - {name.title()}: {hex_color} ({percentage:.1f}%)")
+        print(f"Dominant Color: {result['dominant_name'].title()}")
+        print(f"Multi-Colored: {'Yes' if result['multi_colored'] else 'No'}")
+        print(f"Pattern: {result['pattern']}")
+        print(f"Contains Text: {'Yes' if result['has_text'] else 'No'}")
+        if result['has_text'] and result['detected_text']:
+            print(f"Detected Text: {result['detected_text']}")
+        print(f"Contains Graphic: {'Yes' if result['has_graphic'] else 'No'}")
+
+def plot_color_palette(colors, names, counts, ax):
+    """Visualize color palette with names and percentages"""
+    try:
+        total = sum(counts) if sum(counts) > 0 else 1
+        percentages = [count/total * 100 for count in counts]
+
+        for i, (color, name, percent) in enumerate(zip(colors, names, percentages)):
+            # Ensure color is in correct format
+            if np.max(color) > 1:  # Scale to 0-1 if needed
+                color = np.array(color) / 255.0
+            ax.barh(i, 100, color=color, edgecolor='black')
+            text_color = 'white' if np.mean(color) < 0.5 else 'black'
+            label = f"{name.title()} ({percent:.1f}%)"
+            ax.text(50, i, label,
+                    color=text_color, ha='center', va='center',
+                    fontweight='bold', fontsize=10)
+
+        ax.set_xlim(0, 100)
+        ax.set_ylim(-0.5, len(colors)-0.5)
+        ax.axis('off')
+        ax.set_title('Color Composition Analysis', pad=15)
+    except Exception as e:
+        print(f"Error plotting color palette: {e}")
+        ax.axis('off')
+        ax.text(0.5, 0.5, "Color visualization failed",
+                ha='center', va='center', transform=ax.transAxes)
+
+def group_images_by_product(image_dir):
+    """Group images by product using visual similarity"""
+    try:
+        image_files = [f for f in os.listdir(image_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        image_paths = [os.path.join(image_dir, f) for f in image_files]
+
+        if not image_paths:
+            return []
+
+        # Generate fingerprints for all images
+        fingerprints = []
+        for path in image_paths:
+            img = cv2.imread(path)
+            if img is None:
+                continue
+            fingerprints.append(generate_image_fingerprint(img))
+
+        # Group similar images
+        groups = []
+        used_indices = set()
+
+        for i, fp1 in enumerate(fingerprints):
+            if i in used_indices:
+                continue
+
+            group = [image_paths[i]]
+            used_indices.add(i)
+
+            for j, fp2 in enumerate(fingerprints[i+1:], start=i+1):
+                if j in used_indices:
+                    continue
+
+                # Compare fingerprints
+                hist_diff = cv2.compareHist(fp1['histogram'], fp2['histogram'], cv2.HISTCMP_CORREL)
+                phash_diff = np.sum(fp1['phash'] == fp2['phash']) / fp1['phash'].size
+                similarity = (hist_diff + phash_diff) / 2
+
+                if similarity > 0.85:  # High similarity threshold
+                    group.append(image_paths[j])
+                    used_indices.add(j)
+
+            groups.append(group)
+
+        return groups
+    except Exception as e:
+        print(f"Error grouping images: {e}")
+        # Return each image as its own group if grouping fails
+        return [[path] for path in image_paths if os.path.exists(path)]
+
+def main():
+    # Define paths and parameters
+    model_path = 'path_best.pt'
+    image_dir = 'Path_Text'
+    template_path = 'path_tshirt.obj'  # Your custom template path
+
+    # Check if paths exist
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found at {model_path}")
+    if not os.path.exists(image_dir):
+        raise FileNotFoundError(f"Image directory not found at {image_dir}")
+
+    try:
+        # Load YOLO model
+        model = YOLO(model_path)
+
+        # Define class names (should match your training)
+        class_names = ['Tshirt', 'dress', 'jacket', 'pants', 'shirt', 'short', 'skirt', 'sweater']
+
+        # Group images by product
+        image_groups = group_images_by_product(image_dir)
+
+        if not image_groups:
+            print("No valid images found in the directory")
+            return
+
+        # Process each product group
+        all_results = []
+        for group in image_groups:
+            print(f"\nProcessing product group: {[os.path.basename(p) for p in group]}")
+
+            result = analyze_garment_features(group, model, class_names, template_path)
+
+            if result:
+                all_results.append(result)
+
+        # Visualize all results
+        if all_results:
+            visualize_analysis_results(all_results)
+        else:
+            print("No clothing items detected in any images.")
+
+    except Exception as e:
+        print(f"An error occurred during processing: {e}")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
